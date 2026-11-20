@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel 喊單明細對帳檢查系統</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS CDN for parsing and creating Excel files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Microsoft JhengHei", sans-serif;
+            background-color: #f8fafc;
+        }
+        .drag-active {
+            border-color: #3b82f6 !important;
+            background-color: #eff6ff !important;
+        }
+        /* Custom scrollbar for table */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="text-slate-800 min-h-screen flex flex-col">
+
+    <!-- Header Header Section -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-3.5 flex flex-row items-center justify-between gap-3">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-200">
+                    <i class="fa-solid font-bold fa-calculator text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="text-base sm:text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                        Excel 喊單明細對帳檢查器
+                        <span class="hidden sm:inline text-xs bg-indigo-100 text-indigo-700 font-semibold px-2 py-0.5 rounded-full">零設定最新版</span>
+                    </h1>
+                    <p class="hidden sm:block text-xs text-slate-500">智慧辨識連打商品、排除款式編號、秒查單筆與會員總額錯單</p>
+                </div>
+            </div>
+            
+            <div id="headerActions" class="hidden flex items-center gap-2">
+                <button onclick="resetUpload()" class="px-3.5 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition border border-indigo-200 flex items-center gap-1.5 whitespace-nowrap">
+                    <i class="fa-solid fa-file-arrow-up"></i> 重新上傳
+                </button>
+                <button onclick="loadSampleData()" class="px-3.5 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition border border-slate-300 hidden sm:flex items-center gap-1.5">
+                    <i class="fa-solid fa-rotate-left"></i> 重載範例
+                </button>
+                <button onclick="exportResultExcel()" class="px-4 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition shadow-sm hidden sm:flex items-center gap-1.5">
+                    <i class="fa-solid fa-file-excel text-sm"></i> 匯出標註結果 Excel
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+        <!-- STEP 1: Upload & Paste Section -->
+        <div id="uploadSection" class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+            <div class="text-center max-w-xl mx-auto mb-5">
+                <h2 class="text-lg font-bold text-slate-800">請載入或貼上您的對帳明細表</h2>
+                <p class="text-xs text-slate-500 mt-1">無需修改原本格式，系統自動對應「喊單內容、金額、總金額、會員名稱」</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <!-- Dropzone -->
+                <div id="dropZone" 
+                     class="border-2 border-dashed border-slate-300 hover:border-indigo-500 bg-slate-50 hover:bg-indigo-50/50 rounded-xl p-6 transition flex flex-col items-center justify-center cursor-pointer min-h-[160px] text-center">
+                    <input type="file" id="fileInput" accept=".xlsx, .xls, .csv" class="hidden" onchange="handleFileSelect(event)">
+                    <div class="w-12 h-12 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center mb-3">
+                        <i class="fa-solid fa-cloud-arrow-up text-xl"></i>
+                    </div>
+                    <p class="text-sm font-semibold text-slate-700">點擊選擇 Excel 檔案<span class="hidden md:inline"> 或 將檔案拖曳至此</span></p>
+                    <p class="text-xs text-slate-400 mt-1">支援 .xlsx, .xls, .csv 檔案</p>
+                </div>
+
+                <!-- Fast Paste Box -->
+                <div class="border border-slate-300 rounded-xl p-4 bg-white hidden md:flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center justify-between mb-2">
+                            <label for="pasteInput" class="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                                <i class="fa-solid fa-paste text-indigo-500"></i> 直接複製貼上 (Ctrl+V)
+                            </label>
+                            <span class="text-[10px] text-slate-400">從 Excel 全選複製後貼入</span>
+                        </div>
+                        <textarea id="pasteInput" 
+                                  placeholder="直接在 Excel 框選表格按 Ctrl+C，然後在點擊這裡按 Ctrl+V 貼上..." 
+                                  class="w-full h-24 text-xs border border-slate-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none font-mono text-slate-600 bg-slate-50"></textarea>
+                    </div>
+                    <div class="flex justify-end mt-2">
+                        <button onclick="processPastedText()" class="px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition">
+                            解析貼上內容
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Demo Data Banner -->
+            <div class="mt-4 pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs bg-slate-50 p-3 rounded-xl">
+                <div class="flex items-center gap-2 text-slate-600">
+                    <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-bold text-[11px]">沒帶檔案？</span>
+                    <span>立即體驗內含連打、款式編號、金額相減等異常測試範例：</span>
+                </div>
+                <button onclick="loadSampleData()" class="w-full sm:w-auto px-4 py-1.5 bg-white border border-slate-300 hover:border-indigo-500 text-indigo-600 font-semibold rounded-lg shadow-sm transition hover:bg-indigo-50 flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> 載入測試範例資料
+                </button>
+            </div>
+        </div>
+
+        <!-- STEP 2: Dashboard & Controls (Hidden until data loaded) -->
+        <div id="resultsDashboard" class="hidden space-y-6">
+
+            <!-- Summary Stat Cards -->
+            <div class="grid grid-cols-3 gap-2 sm:gap-4">
+                <!-- Total Rows -->
+                <div class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4 shadow-sm flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-medium text-slate-500">總明細筆數 / 會員數</p>
+                        <p class="text-lg sm:text-2xl font-bold text-slate-900 mt-1" id="statTotalRows">0 <span class="text-xs font-normal text-slate-500">筆</span></p>
+                        <p class="text-xs text-slate-400 mt-0.5" id="statTotalMembers">共 0 位會員</p>
+                    </div>
+                    <div class="hidden sm:flex w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                        <i class="fa-solid fa-users-viewfinder text-xl"></i>
+                    </div>
+                </div>
+
+                <!-- Single Item Errors -->
+                <div id="cardSingleErrors" class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4 shadow-sm flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-medium text-slate-500">單筆計算異常</p>
+                        <p class="text-lg sm:text-2xl font-bold text-rose-600 mt-1" id="statSingleErrors">0 <span class="text-xs font-normal text-rose-400">筆不符</span></p>
+                        <p class="hidden sm:block text-xs text-slate-400 mt-0.5">喊單內容與「金額」對不上</p>
+                    </div>
+                    <div class="hidden sm:flex w-12 h-12 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                        <i class="fa-solid fa-triangle-exclamation text-xl"></i>
+                    </div>
+                </div>
+
+                <!-- Member Total Mismatch -->
+                <div id="cardMemberErrors" class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4 shadow-sm flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-medium text-slate-500">會員總額 / 結帳不符</p>
+                        <p class="text-lg sm:text-2xl font-bold text-amber-600 mt-1" id="statMemberErrors">0 <span class="text-xs font-normal text-amber-400">位會員</span></p>
+                        <p class="hidden sm:block text-xs text-slate-400 mt-0.5">系統加總與「總金額」有差額</p>
+                    </div>
+                    <div class="hidden sm:flex w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                        <i class="fa-solid fa-receipt text-xl"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mapping Auto Detect Notice & Toolbar -->
+            <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                
+                <!-- Tab Switching -->
+                <div class="flex items-center space-x-1 bg-slate-100 p-1 rounded-lg w-full md:w-auto">
+                    <button id="tabBtnDetails" onclick="switchTab('details')" class="flex-1 md:flex-none px-4 py-1.5 text-xs font-bold rounded-md text-indigo-700 bg-white shadow-sm transition">
+                        <i class="fa-solid fa-list-check mr-1.5"></i> 明細核對清單
+                    </button>
+                    <button id="tabBtnMembers" onclick="switchTab('members')" class="flex-1 md:flex-none px-4 py-1.5 text-xs font-bold rounded-md text-slate-600 hover:text-slate-900 transition">
+                        <i class="fa-solid fa-user-group mr-1.5"></i> 會員對帳總表
+                    </button>
+                </div>
+
+                <!-- Filter Controls -->
+                <div class="flex items-center flex-wrap gap-3 w-full md:w-auto justify-end">
+                    <label class="inline-flex items-center cursor-pointer select-none bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
+                        <input type="checkbox" id="onlyErrorsToggle" checked onchange="renderCurrentView()" class="sr-only peer">
+                        <div class="relative w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-rose-600"></div>
+                        <span class="ms-2.5 text-xs font-bold text-slate-700">只顯示有問題的項目</span>
+                    </label>
+
+                    <!-- Column Mapper Drawer Button -->
+                    <button onclick="toggleColumnMapper()" class="px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-200 transition flex items-center gap-1">
+                        <i class="fa-solid fa-sliders"></i> 欄位對應設定
+                    </button>
+                </div>
+            </div>
+
+            <!-- Column Mapper Drawer (Hidden by default) -->
+            <div id="columnMapperBox" class="hidden bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs space-y-3">
+                <div class="flex items-center justify-between border-b border-slate-200 pb-2">
+                    <span class="font-bold text-slate-700"><i class="fa-solid fa-table-columns mr-1"></i> 自動對應欄位（若欄位辨識錯誤，可在此人工調整）</span>
+                    <button onclick="toggleColumnMapper()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3" id="columnSelectsContainer">
+                    <!-- Dynamic Column Selects Inserted Here -->
+                </div>
+            </div>
+
+            <!-- VIEW 1: Single Item Details Table -->
+            <div id="viewDetails" class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div id="detailsCards" class="md:hidden divide-y divide-slate-100"></div>
+                <div class="hidden md:block overflow-x-auto">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead>
+                            <tr class="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                                <th class="py-3 px-4 w-12 text-center">#</th>
+                                <th class="py-3 px-4 min-w-[90px]">時間</th>
+                                <th class="py-3 px-4 min-w-[100px]">會員名稱</th>
+                                <th class="py-3 px-4 min-w-[220px]">喊單內容 (原始)</th>
+                                <th class="py-3 px-4 w-24 text-right">試算金額</th>
+                                <th class="py-3 px-4 w-24 text-right">表上記錄金額</th>
+                                <th class="py-3 px-4 min-w-[200px]">單筆檢查結果與說明</th>
+                            </tr>
+                        </thead>
+                        <tbody id="detailsTableBody" class="divide-y divide-slate-100 font-normal">
+                            <!-- Rows inserted dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="detailsEmptyNotice" class="hidden p-8 text-center text-slate-400 text-xs">
+                    <i class="fa-solid fa-circle-check text-emerald-500 text-3xl mb-2"></i>
+                    <p class="font-bold text-slate-600 text-sm">完全沒有發現異常！</p>
+                    <p class="mt-1">所有單筆明細的金額與計算皆完全吻合。</p>
+                </div>
+            </div>
+
+            <!-- VIEW 2: Member Summary Table -->
+            <div id="viewMembers" class="hidden bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div id="membersCards" class="md:hidden divide-y divide-slate-100"></div>
+                <div class="hidden md:block overflow-x-auto">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead>
+                            <tr class="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                                <th class="py-3 px-4">會員名稱</th>
+                                <th class="py-3 px-4 text-center">明細筆數</th>
+                                <th class="py-3 px-4 text-right">系統計算加總</th>
+                                <th class="py-3 px-4 text-right">表格填寫總金額</th>
+                                <th class="py-3 px-4 text-right">官方結帳金額</th>
+                                <th class="py-3 px-4 text-right">總金額差額</th>
+                                <th class="py-3 px-4">狀態與對帳建議</th>
+                            </tr>
+                        </thead>
+                        <tbody id="membersTableBody" class="divide-y divide-slate-100">
+                            <!-- Member Rows inserted dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="membersEmptyNotice" class="hidden p-8 text-center text-slate-400 text-xs">
+                    <i class="fa-solid fa-circle-check text-emerald-500 text-3xl mb-2"></i>
+                    <p class="font-bold text-slate-600 text-sm">所有會員金額對帳完全正確！</p>
+                    <p class="mt-1">系統算出的加總與表格中的總金額、官方結帳金額完全一致。</p>
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-slate-200 py-4 mt-auto text-center text-xs text-slate-400">
+        <p>Excel 喊單明細對帳檢查系統 &bull; 100% 本地端瀏覽器即時運算，資料絕不上傳伺服器</p>
+    </footer>
+
+    <!-- LOGIC SCRIPT -->
+    <script>
+        // Global State
+        let rawData = [];
+        let parsedRows = [];
+        let memberSummaries = [];
+        let currentTab = 'details';
+        
+        // Dynamic Column Mapping Indices
+        let colMap = {
+            time: -1,
+            name: -1,
+            content: -1,
+            amount: -1,
+            totalAmount: -1,
+            officialAmount: -1
+        };
+
+        // Initialize drag and drop events
+        window.addEventListener('DOMContentLoaded', () => {
+            const dropZone = document.getElementById('dropZone');
+            
+            dropZone.addEventListener('click', () => document.getElementById('fileInput').click());
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropZone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropZone.classList.add('drag-active');
+                }, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropZone.classList.remove('drag-active');
+                }, false);
+            });
+
+            dropZone.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                if (files.length > 0) {
+                    processFile(files[0]);
+                }
+            });
+        });
+
+        // 1. File Selection Handler
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                processFile(file);
+            }
+        }
+
+        // Process File with SheetJS
+        function processFile(file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const json = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+                processParsedArrayData(json);
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // 2. Paste Input Handler
+        function processPastedText() {
+            const text = document.getElementById('pasteInput').value.trim();
+            if (!text) {
+                alert('請先在文字框中貼上從 Excel 複製的內容！');
+                return;
+            }
+
+            // Parse TSV (Tab separated lines)
+            const lines = text.split(/\r?\n/);
+            const arrayData = lines.map(line => line.split('\t'));
+            processParsedArrayData(arrayData);
+        }
+
+        // 重新上傳：回到上傳畫面
+        function resetUpload() {
+            document.getElementById('fileInput').value = '';
+            document.getElementById('pasteInput').value = '';
+            document.getElementById('uploadSection').classList.remove('hidden');
+            document.getElementById('resultsDashboard').classList.add('hidden');
+            document.getElementById('headerActions').classList.add('hidden');
+            window.scrollTo({ top: 0 });
+        }
+
+        // 3. Load Preset Sample Data
+        function loadSampleData() {
+            const sampleData = [
+                ["時間", "會員名稱", "喊單內容", "金額", "總金額", "官方結帳金額"],
+                ["10/24 14:02", "王小明", "原味133+6辣味133+8海鮮133+2", 2128, 2128, 2128],
+                ["10/24 14:05", "李美麗", "草莓138+2西瓜660+3", 2256, 3055, 3055],
+                ["10/24 14:06", "李美麗", "各一99+3", 297, 3055, 3055],
+                ["10/24 14:08", "李美麗", "左2199+1", 199, 3055, 3055],
+                ["10/24 14:10", "張大華", "吹風機500+2", 1000, 1000, 1000],
+                ["10/24 14:12", "陳阿姨", "原味133+3", 500, 399, 399], // Single error: 133*3=399, but recorded as 500
+                ["10/24 14:14", "周小姐", "65+2。2-12", 130, 130, 130],
+                ["10/24 14:15", "林先生", "大外套800*2中褲300*1", 1900, 1900, 1800] // Official mismatch
+            ];
+            processParsedArrayData(sampleData);
+        }
+
+        // 4. Master Data Processing
+        function processParsedArrayData(data) {
+            if (!data || data.length === 0) {
+                alert('載入的資料為空！');
+                return;
+            }
+
+            rawData = data;
+
+            // Auto-detect columns
+            autoDetectColumns(data);
+
+            // Execute full audit
+            runAudit();
+
+            // Display UI Dashboard
+            document.getElementById('uploadSection').classList.add('hidden');
+            document.getElementById('resultsDashboard').classList.remove('hidden');
+            document.getElementById('headerActions').classList.remove('hidden');
+            document.getElementById('headerActions').classList.add('flex');
+        }
+
+        // Auto Detect Headers
+        function autoDetectColumns(data) {
+            colMap = { time: -1, name: -1, content: -1, amount: -1, totalAmount: -1, officialAmount: -1 };
+            
+            // Look at top 3 rows to find headers
+            let headerRowIndex = 0;
+            for (let r = 0; r < Math.min(3, data.length); r++) {
+                const rowStr = data[r].map(cell => String(cell).toLowerCase()).join(' ');
+                if (rowStr.includes('喊單') || rowStr.includes('內容') || rowStr.includes('金額') || rowStr.includes('會員')) {
+                    headerRowIndex = r;
+                    break;
+                }
+            }
+
+            const headerRow = data[headerRowIndex].map(cell => String(cell).trim());
+
+            headerRow.forEach((colName, index) => {
+                const name = colName.toLowerCase();
+                if (colMap.time === -1 && (name.includes('時間') || name.includes('日期') || name.includes('time') || name.includes('date'))) {
+                    colMap.time = index;
+                } else if (colMap.name === -1 && (name.includes('會員') || name.includes('姓名') || name.includes('買家') || name.includes('name'))) {
+                    colMap.name = index;
+                } else if (colMap.content === -1 && (name.includes('喊單') || name.includes('內容') || name.includes('品項') || name.includes('商品') || name.includes('item'))) {
+                    colMap.content = index;
+                } else if (colMap.officialAmount === -1 && (name.includes('官方') || name.includes('結帳') || name.includes('應付'))) {
+                    colMap.officialAmount = index;
+                } else if (colMap.totalAmount === -1 && (name.includes('總金額') || name.includes('合計') || name.includes('總計'))) {
+                    colMap.totalAmount = index;
+                } else if (colMap.amount === -1 && (name.includes('金額') || name.includes('小計') || name.includes('單價') || name.includes('price'))) {
+                    colMap.amount = index;
+                }
+            });
+
+            // Fallback heuristics if missing
+            if (colMap.content === -1) colMap.content = 2 < headerRow.length ? 2 : 0;
+            if (colMap.amount === -1) colMap.amount = 3 < headerRow.length ? 3 : 1;
+            if (colMap.name === -1) colMap.name = 1 < headerRow.length ? 1 : 0;
+
+            renderColumnMapperOptions(headerRow);
+        }
+
+        // Render Column Mapper UI
+        function renderColumnMapperOptions(headers) {
+            const container = document.getElementById('columnSelectsContainer');
+            container.innerHTML = '';
+
+            const fields = [
+                { key: 'time', label: '時間' },
+                { key: 'name', label: '會員名稱' },
+                { key: 'content', label: '喊單內容' },
+                { key: 'amount', label: '單筆金額' },
+                { key: 'totalAmount', label: '總金額' },
+                { key: 'officialAmount', label: '官方結帳金額' }
+            ];
+
+            fields.forEach(field => {
+                const div = document.createElement('div');
+                div.className = "flex flex-col space-y-1";
+                
+                let optionsHtml = `<option value="-1">-- 無此欄位 --</option>`;
+                headers.forEach((h, idx) => {
+                    const selected = colMap[field.key] === idx ? 'selected' : '';
+                    optionsHtml += `<option value="${idx}" ${selected}>${h || '第 ' + (idx+1) + ' 欄'}</option>`;
+                });
+
+                div.innerHTML = `
+                    <label class="font-semibold text-slate-600">${field.label}:</label>
+                    <select onchange="updateColMapping('${field.key}', this.value)" class="border border-slate-300 rounded px-2 py-1 bg-white text-xs">
+                        ${optionsHtml}
+                    </select>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function toggleColumnMapper() {
+            const box = document.getElementById('columnMapperBox');
+            box.classList.toggle('hidden');
+        }
+
+        function updateColMapping(key, val) {
+            colMap[key] = parseInt(val);
+            runAudit();
+        }
+
+        // ==========================================
+        // 5. CORE INTELLIGENT PARSER & AUDIT ENGINE
+        // ==========================================
+        function runAudit() {
+            parsedRows = [];
+            memberSummaries = [];
+
+            if (rawData.length <= 1) return;
+
+            // Determine header row index
+            let startRow = 1;
+            const firstRowStr = rawData[0].map(c => String(c)).join('');
+            if (!firstRowStr.includes('喊單') && !firstRowStr.includes('金額') && !firstRowStr.includes('時間')) {
+                startRow = 0; // No header row
+            }
+
+            // Step A: Parse every single item row
+            for (let i = startRow; i < rawData.length; i++) {
+                const row = rawData[i];
+                if (!row || row.length === 0 || row.every(cell => String(cell).trim() === "")) continue;
+
+                const timeStr = colMap.time >= 0 && row[colMap.time] !== undefined ? String(row[colMap.time]).trim() : '';
+                const nameStr = colMap.name >= 0 && row[colMap.name] !== undefined ? String(row[colMap.name]).trim() : '匿名買家';
+                const contentStr = colMap.content >= 0 && row[colMap.content] !== undefined ? String(row[colMap.content]).trim() : '';
+                const amountVal = colMap.amount >= 0 && row[colMap.amount] !== undefined ? cleanNumber(row[colMap.amount]) : 0;
+                const totalAmountVal = colMap.totalAmount >= 0 && row[colMap.totalAmount] !== undefined ? cleanNumber(row[colMap.totalAmount]) : null;
+                const officialAmountVal = colMap.officialAmount >= 0 && row[colMap.officialAmount] !== undefined ? cleanNumber(row[colMap.officialAmount]) : null;
+
+                // Smart parse order content
+                const parseResult = smartParseOrderContent(contentStr, amountVal);
+
+                parsedRows.push({
+                    rowIndex: i + 1,
+                    time: timeStr,
+                    name: nameStr,
+                    content: contentStr,
+                    recordedAmount: amountVal,
+                    calculatedAmount: parseResult.calculatedAmount,
+                    status: parseResult.status, // 'PASS', 'ERROR', 'WARNING'
+                    note: parseResult.note,
+                    totalAmountVal: totalAmountVal,
+                    officialAmountVal: officialAmountVal
+                });
+            }
+
+            // Step B: Group by Member to audit Total Amounts
+            const memberMap = {};
+
+            parsedRows.forEach(item => {
+                if (!memberMap[item.name]) {
+                    memberMap[item.name] = {
+                        name: item.name,
+                        rows: [],
+                        calcSum: 0,
+                        recordedSum: 0,
+                        tableTotalAmount: null,
+                        officialCheckoutAmount: null
+                    };
+                }
+
+                const m = memberMap[item.name];
+                m.rows.push(item);
+                m.calcSum += item.calculatedAmount;
+                m.recordedSum += item.recordedAmount;
+
+                // Pick the highest or non-null table Total / Official amounts reported in rows
+                if (item.totalAmountVal !== null && item.totalAmountVal > 0) {
+                    m.tableTotalAmount = item.totalAmountVal;
+                }
+                if (item.officialAmountVal !== null && item.officialAmountVal > 0) {
+                    m.officialCheckoutAmount = item.officialAmountVal;
+                }
+            });
+
+            // Analyze Member Totals
+            memberSummaries = Object.values(memberMap).map(m => {
+                const hasRecordedTotal = m.tableTotalAmount !== null;
+                const hasOfficial = m.officialCheckoutAmount !== null;
+
+                let diff = 0;
+                let status = 'PASS';
+                let notes = [];
+
+                // Compare calculatedSum vs recorded items sum
+                const isSingleItemsSumCorrect = m.calcSum === m.recordedSum;
+
+                if (hasRecordedTotal) {
+                    diff = m.recordedSum - m.tableTotalAmount;
+                    if (diff !== 0) {
+                        status = 'ERROR';
+                        notes.push(`表格總金額 (${formatCurrency(m.tableTotalAmount)}) 與明細金額加總 (${formatCurrency(m.recordedSum)}) 差額: ${diff > 0 ? '+' : ''}${formatCurrency(diff)}`);
+                    }
+                }
+
+                if (hasOfficial) {
+                    const officialDiff = m.recordedSum - m.officialCheckoutAmount;
+                    if (officialDiff !== 0) {
+                        status = 'ERROR';
+                        notes.push(`官方結帳金額 (${formatCurrency(m.officialCheckoutAmount)}) 與加總有差額: ${officialDiff > 0 ? '+' : ''}${formatCurrency(officialDiff)}`);
+                    }
+                }
+
+                if (!isSingleItemsSumCorrect) {
+                    notes.push(`包含內文喊單試算異常，重算總計額應為 ${formatCurrency(m.calcSum)}`);
+                }
+
+                if (notes.length === 0) {
+                    notes.push('✅ 會員對帳完全吻合');
+                }
+
+                return {
+                    name: m.name,
+                    rowCount: m.rows.length,
+                    calcSum: m.calcSum,
+                    recordedSum: m.recordedSum,
+                    tableTotalAmount: m.tableTotalAmount ?? m.recordedSum,
+                    officialCheckoutAmount: m.officialCheckoutAmount ?? m.recordedSum,
+                    diff: diff,
+                    status: status,
+                    note: notes.join('； ')
+                };
+            });
+
+            // Update UI Stats & Tables
+            updateStats();
+            renderCurrentView();
+        }
+
+        // Clean Number Utility
+        function cleanNumber(val) {
+            if (val === null || val === undefined || val === '') return 0;
+            const str = String(val).replace(/,/g, '').replace(/[^\d.-]/g, '');
+            const num = parseFloat(str);
+            return isNaN(num) ? 0 : num;
+        }
+
+        // Format Currency
+        function formatCurrency(num) {
+            return new Intl.NumberFormat('zh-TW').format(num);
+        }
+
+        // ==========================================
+        // 6. SMART ORDER CONTENT PARSER ALGORITHM (v3: 候選解釋比對，以表上金額為準)
+        //    - 標點斷句
+        //    - 款式編號 (數字-數字) 過濾（修正正則回溯誤吃價格的問題）
+        //    - 每組「價格+數量」產生多種候選解讀，找出能對上表上金額者才算正常
+        //        1) 原樣                     例：169+2
+        //        2) 過濾價格前綴編號         例：3180+2 -> 180×2、11390+1 -> 390×1
+        //        3) 排除黏在數量後的款式編號 例：65+22-7 -> 65×2（款式 2-7）
+        // ==========================================
+        function buildPairCandidates(m) {
+            const p = m.priceStr;
+            const q = m.qtyStr;
+            const tail = m.tail; // "65+22-7" 的 "7"，沒有則為 undefined
+
+            const priceOpts = [{ s: p, note: null, raw: true }];
+            if (p.length >= 3) priceOpts.push({ s: p.substring(1), note: `已過濾編號「${p.substring(0, 1)}」` });
+            if (p.length >= 4) priceOpts.push({ s: p.substring(2), note: `已過濾編號「${p.substring(0, 2)}」` });
+
+            const qtyOpts = [{ s: q, note: null, raw: true }];
+            if (tail !== undefined && q.length >= 2) {
+                qtyOpts.push({ s: q.slice(0, -1), note: `已排除款式編號「${q.slice(-1)}-${tail}」` });
+            }
+
+            const list = [];
+            priceOpts.forEach(po => {
+                qtyOpts.forEach(qo => {
+                    let price = parseInt(po.s, 10);
+                    let qty = parseInt(qo.s, 10);
+                    const isRaw = po.raw && qo.raw;
+
+                    // 原始解讀即使為 0 也要保留，才能回報試算結果；其他候選必須為正數
+                    if (!isRaw && !(price > 0 && qty > 0)) return;
+                    if (isNaN(price) || isNaN(qty)) return;
+
+                    // 數量在前、價格在後 (例如 2*350)
+                    if (num1IsQtyFirst(price, qty)) {
+                        const t = price; price = qty; qty = t;
+                    }
+
+                    const notes = [po.note, qo.note].filter(Boolean);
+                    list.push({ price, qty, notes, adj: notes.length });
+                });
+            });
+            return list;
+        }
+
+        function num1IsQtyFirst(num1, num2) {
+            return num1 <= 10 && num2 > 50;
+        }
+
+        function smartParseOrderContent(content, targetAmount) {
+            if (!content) {
+                return { calculatedAmount: targetAmount, status: 'PASS', note: '無內文，以表格金額為準' };
+            }
+
+            // Step 0: 全形轉半形 (＋ ＊ － 數字等)，並把各種破折號/連字號 (– — − ‐ ‑ ― 等) 統一成 "-"
+            //   避免 "65+22–11" 的長破折號讓款式編號 (2-11) 認不出來
+            let normalized = String(content)
+                .normalize('NFKC')
+                .replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D\u30FC]/g, '-');
+
+            // Step 1: 標點符號強制斷句（避免 "65+2。2-12" 黏連）
+            normalized = normalized.replace(/[。，、；：,;!！?？\/｜|]+/g, ' ');
+
+            // Step 2: 過濾 "數字-數字" 規格/款式編號（例如 "2-12"、"2-2"）
+            //   後面不可再接數字 (?!\d)，避免 "1-169+2" 被回溯誤吃成 "1-16" 而只剩 "9+2"
+            //   後面不可接 +*x× (?!\s*[+*xX×])，代表那是「編號-價格+數量」的一部分，要保留
+            normalized = normalized.replace(/(^|\s|[^\d+\*xX×])\d+-\d+(?!\d)(?!\s*[\+\*xX×])/g, '$1 ');
+
+            // Keyword hints check
+            const containsKeywords = /各一|各1|買一送一|雙色|兩款|各\d+/i.test(content);
+
+            // Pattern: 價格+數量，可選擇性黏著款式尾巴 (-數字)
+            const pairRegex = /(\d+)\s*[\+\*xX\u00d7]\s*(\d+)(?:-(\d+))?/g;
+            let match;
+            const matches = [];
+            while ((match = pairRegex.exec(normalized)) !== null) {
+                matches.push({ priceStr: match[1], qtyStr: match[2], tail: match[3] });
+            }
+
+            if (matches.length > 0) {
+                const candidateLists = matches.map(buildPairCandidates);
+
+                // 預設（原樣）解讀：用來在對不上時回報
+                const defaultChosen = candidateLists.map(l => l[0]);
+                const defaultSum = defaultChosen.reduce((s, c) => s + c.price * c.qty, 0);
+                const defaultDetails = defaultChosen.map(c => `${c.price}×${c.qty}`);
+
+                // 在所有候選組合中，找出「總和等於表上金額」且調整次數最少的解讀
+                let best = null;
+                let visited = 0;
+                const LIMIT = 20000;
+                const chosen = [];
+                (function dfs(i, sum, adj) {
+                    if (visited > LIMIT) return;
+                    if (i === candidateLists.length) {
+                        visited++;
+                        if (sum === targetAmount && (best === null || adj < best.adj)) {
+                            best = { chosen: chosen.slice(), adj: adj, sum: sum };
+                        }
+                        return;
+                    }
+                    for (const c of candidateLists[i]) {
+                        chosen.push(c);
+                        dfs(i + 1, sum + c.price * c.qty, adj + c.adj);
+                        chosen.pop();
+                    }
+                })(0, 0, 0);
+
+                if (best) {
+                    const details = best.chosen.map(c => `${c.price}×${c.qty}`).join(' + ');
+                    const adjNotes = [];
+                    best.chosen.forEach(c => c.notes.forEach(n => { if (!adjNotes.includes(n)) adjNotes.push(n); }));
+
+                    let note = `✅ 試算吻合 (${details})`;
+                    if (adjNotes.length > 0) {
+                        note += ` (${adjNotes.join('、')})`;
+                    }
+                    if (containsKeywords) {
+                        note += ` (包含「各一」等字眼，經試算符合金額)`;
+                    }
+                    return { calculatedAmount: best.sum, status: 'PASS', note: note };
+                }
+
+                // 所有候選解讀都對不上表上金額
+                if (containsKeywords) {
+                    return {
+                        calculatedAmount: defaultSum,
+                        status: 'WARNING',
+                        note: `⚠️ 內文含「各一/雙色」，試算為 ${formatCurrency(defaultSum)} (${defaultDetails.join('+')})，但表上記錄 ${formatCurrency(targetAmount)}，請人工確認倍數`
+                    };
+                }
+
+                const diff = targetAmount - defaultSum;
+                return {
+                    calculatedAmount: defaultSum,
+                    status: 'ERROR',
+                    note: `❌ 單筆金額不符：喊單算出來是 ${formatCurrency(defaultSum)} (${defaultDetails.join('+')})，但表上記錄 ${formatCurrency(targetAmount)} (相差 ${diff > 0 ? '+' : ''}${formatCurrency(diff)})`
+                };
+            }
+
+            // 沒有任何可計算的「價格+數量」算式時，檢查是否其實是漏填或格式不完整
+            const hasDigits = /\d/.test(normalized);
+            // 運算符號 (+ * x ×) 後面沒有接數量，例如 "99-1+"、"99+"
+            const hasDangling = /\d\s*[\+\*xX\u00d7]\s*(?:$|[^\d\s])/.test(normalized);
+            const amountMissing = (!targetAmount || targetAmount === 0) && hasDigits;
+
+            if (amountMissing || hasDangling) {
+                const issues = [];
+                if (amountMissing) issues.push('表上金額空白或為 0，但喊單內容含有數字');
+                if (hasDangling) issues.push('喊單格式不完整（運算符號後面沒有數量）');
+                return {
+                    calculatedAmount: targetAmount,
+                    status: amountMissing ? 'ERROR' : 'WARNING',
+                    note: `${amountMissing ? '❌' : '⚠️'} 無法試算：${issues.join('；')}，請人工確認`
+                };
+            }
+
+            if (containsKeywords) {
+                return {
+                    calculatedAmount: targetAmount,
+                    status: 'WARNING',
+                    note: `⚠️ 內文包含「各一/多款」語意字眼，請抽查明細數量`
+                };
+            }
+
+            return {
+                calculatedAmount: targetAmount,
+                status: 'PASS',
+                note: `✅ 格式正常 (未偵測到相乘計算式)`
+            };
+        }
+
+        // ==========================================
+        // 7. RENDER & UI UPDATES
+        // ==========================================
+        function updateStats() {
+            const singleErrorsCount = parsedRows.filter(r => r.status === 'ERROR' || r.status === 'WARNING').length;
+            const memberErrorsCount = memberSummaries.filter(m => m.status === 'ERROR').length;
+
+            document.getElementById('statTotalRows').innerText = parsedRows.length;
+            document.getElementById('statTotalMembers').innerText = `共 ${memberSummaries.length} 位會員`;
+
+            const singleErrElem = document.getElementById('statSingleErrors');
+            singleErrElem.innerText = singleErrorsCount;
+            if (singleErrorsCount > 0) {
+                singleErrElem.className = "text-lg sm:text-2xl font-bold text-rose-600 mt-1";
+            } else {
+                singleErrElem.className = "text-lg sm:text-2xl font-bold text-emerald-600 mt-1";
+                singleErrElem.innerText = "0 筆全無誤";
+            }
+
+            const memberErrElem = document.getElementById('statMemberErrors');
+            memberErrElem.innerText = memberErrorsCount;
+            if (memberErrorsCount > 0) {
+                memberErrElem.className = "text-lg sm:text-2xl font-bold text-amber-600 mt-1";
+            } else {
+                memberErrElem.className = "text-lg sm:text-2xl font-bold text-emerald-600 mt-1";
+                memberErrElem.innerText = "0 位全符合";
+            }
+        }
+
+        function switchTab(tab) {
+            currentTab = tab;
+            const btnDetails = document.getElementById('tabBtnDetails');
+            const btnMembers = document.getElementById('tabBtnMembers');
+            const viewDetails = document.getElementById('viewDetails');
+            const viewMembers = document.getElementById('viewMembers');
+
+            if (tab === 'details') {
+                btnDetails.className = "flex-1 md:flex-none px-4 py-1.5 text-xs font-bold rounded-md text-indigo-700 bg-white shadow-sm transition";
+                btnMembers.className = "flex-1 md:flex-none px-4 py-1.5 text-xs font-bold rounded-md text-slate-600 hover:text-slate-900 transition";
+                viewDetails.classList.remove('hidden');
+                viewMembers.classList.add('hidden');
+            } else {
+                btnMembers.className = "flex-1 md:flex-none px-4 py-1.5 text-xs font-bold rounded-md text-indigo-700 bg-white shadow-sm transition";
+                btnDetails.className = "flex-1 md:flex-none px-4 py-1.5 text-xs font-bold rounded-md text-slate-600 hover:text-slate-900 transition";
+                viewMembers.classList.remove('hidden');
+                viewDetails.classList.add('hidden');
+            }
+
+            renderCurrentView();
+        }
+
+        function renderCurrentView() {
+            const onlyErrors = document.getElementById('onlyErrorsToggle').checked;
+
+            if (currentTab === 'details') {
+                renderDetailsTable(onlyErrors);
+            } else {
+                renderMembersTable(onlyErrors);
+            }
+        }
+
+        // Render Details Table
+        function renderDetailsTable(onlyErrors) {
+            const tbody = document.getElementById('detailsTableBody');
+            const emptyNotice = document.getElementById('detailsEmptyNotice');
+            const cards = document.getElementById('detailsCards');
+            tbody.innerHTML = '';
+            cards.innerHTML = '';
+
+            let filteredRows = parsedRows;
+            if (onlyErrors) {
+                filteredRows = parsedRows.filter(r => r.status === 'ERROR' || r.status === 'WARNING');
+            }
+
+            if (filteredRows.length === 0) {
+                emptyNotice.classList.remove('hidden');
+                return;
+            } else {
+                emptyNotice.classList.add('hidden');
+            }
+
+            filteredRows.forEach(item => {
+                const tr = document.createElement('tr');
+                
+                let rowBgClass = "hover:bg-slate-50/80 transition";
+                let badgeClass = "bg-emerald-100 text-emerald-800 border-emerald-200";
+                let iconClass = "fa-circle-check text-emerald-500";
+
+                if (item.status === 'ERROR') {
+                    rowBgClass = "bg-rose-50/60 hover:bg-rose-100/50 transition";
+                    badgeClass = "bg-rose-100 text-rose-800 border-rose-200";
+                    iconClass = "fa-circle-xmark text-rose-500";
+                } else if (item.status === 'WARNING') {
+                    rowBgClass = "bg-amber-50/60 hover:bg-amber-100/50 transition";
+                    badgeClass = "bg-amber-100 text-amber-800 border-amber-200";
+                    iconClass = "fa-triangle-exclamation text-amber-500";
+                }
+
+                tr.className = rowBgClass;
+                tr.innerHTML = `
+                    <td class="py-3 px-4 text-center font-mono text-slate-400">${item.rowIndex}</td>
+                    <td class="py-3 px-4 text-slate-500 font-mono">${item.time || '-'}</td>
+                    <td class="py-3 px-4 font-bold text-slate-800">${escapeHtml(item.name)}</td>
+                    <td class="py-3 px-4 font-mono text-slate-700 bg-slate-50/50 rounded">${escapeHtml(item.content)}</td>
+                    <td class="py-3 px-4 text-right font-mono font-semibold text-indigo-600">${formatCurrency(item.calculatedAmount)}</td>
+                    <td class="py-3 px-4 text-right font-mono ${item.calculatedAmount !== item.recordedAmount ? 'font-bold text-rose-600 underline' : 'text-slate-700'}">${formatCurrency(item.recordedAmount)}</td>
+                    <td class="py-3 px-4">
+                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border ${badgeClass}">
+                            <i class="fa-solid ${iconClass}"></i>
+                            ${escapeHtml(item.note)}
+                        </span>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+
+                // 手機版卡片
+                const card = document.createElement('div');
+                card.className = `p-3 ${rowBgClass.replace(/hover:\S+/g, '').replace('transition', '')}`;
+                const amountMismatch = item.calculatedAmount !== item.recordedAmount;
+                card.innerHTML = `
+                    <div class="flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                        <span>#${item.rowIndex}</span>
+                        <span>${item.time || '-'}</span>
+                    </div>
+                    <div class="mt-1 text-sm font-bold text-slate-800 break-all">${escapeHtml(item.name)}</div>
+                    <div class="mt-1.5 px-2 py-1.5 rounded bg-slate-50 border border-slate-100 font-mono text-xs text-slate-700 break-all">${escapeHtml(item.content)}</div>
+                    <div class="mt-2 flex items-center gap-5 text-xs">
+                        <div class="text-slate-500">試算 <span class="font-mono font-semibold text-indigo-600 text-sm">${formatCurrency(item.calculatedAmount)}</span></div>
+                        <div class="text-slate-500">表上 <span class="font-mono text-sm ${amountMismatch ? 'font-bold text-rose-600 underline' : 'text-slate-700'}">${formatCurrency(item.recordedAmount)}</span></div>
+                    </div>
+                    <div class="mt-2 inline-flex items-start gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] leading-snug font-medium border ${badgeClass}">
+                        <i class="fa-solid ${iconClass} mt-0.5"></i>
+                        <span>${escapeHtml(item.note)}</span>
+                    </div>
+                `;
+                cards.appendChild(card);
+            });
+        }
+
+        // Render Members Table
+        function renderMembersTable(onlyErrors) {
+            const tbody = document.getElementById('membersTableBody');
+            const emptyNotice = document.getElementById('membersEmptyNotice');
+            const cards = document.getElementById('membersCards');
+            tbody.innerHTML = '';
+            cards.innerHTML = '';
+
+            let filteredMembers = memberSummaries;
+            if (onlyErrors) {
+                filteredMembers = memberSummaries.filter(m => m.status === 'ERROR');
+            }
+
+            if (filteredMembers.length === 0) {
+                emptyNotice.classList.remove('hidden');
+                return;
+            } else {
+                emptyNotice.classList.add('hidden');
+            }
+
+            filteredMembers.forEach(m => {
+                const tr = document.createElement('tr');
+                
+                let rowBgClass = "hover:bg-slate-50/80 transition";
+                let badgeClass = "bg-emerald-100 text-emerald-800 border-emerald-200";
+
+                if (m.status === 'ERROR') {
+                    rowBgClass = "bg-amber-50/60 hover:bg-amber-100/50 transition";
+                    badgeClass = "bg-rose-100 text-rose-800 border-rose-200";
+                }
+
+                tr.className = rowBgClass;
+                tr.innerHTML = `
+                    <td class="py-3 px-4 font-bold text-slate-800">${escapeHtml(m.name)}</td>
+                    <td class="py-3 px-4 text-center font-mono text-slate-500">${m.rowCount} 筆</td>
+                    <td class="py-3 px-4 text-right font-mono font-semibold text-indigo-600">${formatCurrency(m.calcSum)}</td>
+                    <td class="py-3 px-4 text-right font-mono text-slate-700">${formatCurrency(m.tableTotalAmount)}</td>
+                    <td class="py-3 px-4 text-right font-mono text-slate-700">${formatCurrency(m.officialCheckoutAmount)}</td>
+                    <td class="py-3 px-4 text-right font-mono font-bold ${m.diff !== 0 ? 'text-rose-600' : 'text-slate-400'}">
+                        ${m.diff !== 0 ? (m.diff > 0 ? '+' : '') + formatCurrency(m.diff) : '0'}
+                    </td>
+                    <td class="py-3 px-4">
+                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border ${badgeClass}">
+                            ${escapeHtml(m.note)}
+                        </span>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+
+                // 手機版卡片
+                const card = document.createElement('div');
+                card.className = `p-3 ${rowBgClass.replace(/hover:\S+/g, '').replace('transition', '')}`;
+                card.innerHTML = `
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm font-bold text-slate-800 break-all">${escapeHtml(m.name)}</span>
+                        <span class="text-[11px] font-mono text-slate-400 whitespace-nowrap ml-2">${m.rowCount} 筆</span>
+                    </div>
+                    <div class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500">
+                        <div>系統計算加總 <span class="font-mono font-semibold text-indigo-600">${formatCurrency(m.calcSum)}</span></div>
+                        <div>表格總金額 <span class="font-mono text-slate-700">${formatCurrency(m.tableTotalAmount)}</span></div>
+                        <div>官方結帳 <span class="font-mono text-slate-700">${formatCurrency(m.officialCheckoutAmount)}</span></div>
+                        <div>差額 <span class="font-mono font-bold ${m.diff !== 0 ? 'text-rose-600' : 'text-slate-400'}">${m.diff !== 0 ? (m.diff > 0 ? '+' : '') + formatCurrency(m.diff) : '0'}</span></div>
+                    </div>
+                    <div class="mt-2 inline-flex items-start px-2.5 py-1.5 rounded-md text-[11px] leading-snug font-medium border ${badgeClass}">
+                        <span>${escapeHtml(m.note)}</span>
+                    </div>
+                `;
+                cards.appendChild(card);
+            });
+        }
+
+        // Helper: Escape HTML
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        // ==========================================
+        // 8. EXPORT RESULT TO EXCEL
+        // ==========================================
+        function exportResultExcel() {
+            if (parsedRows.length === 0) {
+                alert('沒有資料可供匯出！');
+                return;
+            }
+
+            // Prepare export rows
+            const exportRows = parsedRows.map(r => ({
+                "列號": r.rowIndex,
+                "時間": r.time,
+                "會員名稱": r.name,
+                "喊單內容": r.content,
+                "系統試算單筆金額": r.calculatedAmount,
+                "表格原金額": r.recordedAmount,
+                "表格總金額": r.totalAmountVal,
+                "官方結帳金額": r.officialAmountVal,
+                "單筆檢查結果": r.status === 'PASS' ? '正常' : (r.status === 'ERROR' ? '算錯異常' : '需人工確認'),
+                "檢查詳細說明": r.note
+            }));
+
+            const worksheet = XLSX.utils.json_to_sheet(exportRows);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "對帳標註結果");
+
+            // Also append Member Totals Sheet
+            const memberExportRows = memberSummaries.map(m => ({
+                "會員名稱": m.name,
+                "明細筆數": m.rowCount,
+                "系統喊單重算總計": m.calcSum,
+                "明細欄位加總": m.recordedSum,
+                "表格標示總金額": m.tableTotalAmount,
+                "官方結帳金額": m.officialCheckoutAmount,
+                "總金額差額": m.diff,
+                "對帳結果": m.status === 'PASS' ? '正確' : '異常不符',
+                "備註說明": m.note
+            }));
+            const memberWorksheet = XLSX.utils.json_to_sheet(memberExportRows);
+            XLSX.utils.book_append_sheet(workbook, memberWorksheet, "會員對帳總表");
+
+            // Download file
+            XLSX.writeFile(workbook, "喊單明細對帳檢查結果.xlsx");
+        }
+    </script>
+</body>
+</html>
